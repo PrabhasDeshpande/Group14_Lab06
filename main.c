@@ -26,6 +26,8 @@ Implement the same but using only 1 switch (SW1 OR SW2) – short press for d incr
 #include <stdbool.h>
 #include <tm4c123gh6pm.h>
 
+ float D = 50;           // default duty cycle of 50% // GLOBAL VARIABLE
+
 
 void GPIO_PORTF_INIT(void)
 {
@@ -38,6 +40,24 @@ void GPIO_PORTF_INIT(void)
 
     GPIO_PORTF_DEN_R = 0x1F;    //enable digital operation at pins
     GPIO_PORTF_PUR_R = 0x11;    //enable pullups for switches
+
+
+
+    /*.............interrupt enabling : below part.................................*/
+
+     GPIO_PORTF_IM_R  = 0x00;           // mask the interrupts
+
+     GPIO_PORTF_IS_R  &= ~(1<<4) ;      // sw2 edge detection only
+     GPIO_PORTF_IBE_R &= ~(1<<4);       // int gen controlled by IEV, no both-edge-det
+
+
+
+     GPIO_PORTF_IEV_R &= ~(1<<4);       // low level or falling edge triggers int
+
+     GPIO_PORTF_ICR_R = 0x01;           // clear int if any
+
+     GPIO_PORTF_IM_R  |= (1<<4);        // send int to controller
+
 
 
 
@@ -71,24 +91,40 @@ void systick_pwm_gen(float d, int clock, float Ttot,int state)
 }
 
 
+void GPIO_PORTF_Handler(void)
+{
+
+    if((GPIO_PORTF_MIS_R & (1<<4)))
+    {
+        GPIO_PORTF_DATA_R |= 0x04;
+
+    }
+
+
+}
+
+
 
 void main(void)
 {
+
+    NVIC_EN0_R = (1<<30);   // enabling int on PORTF
     GPIO_PORTF_INIT();
+
 
     int clock = 16000000;   // on chip clock @ 16Mhz
 
-    int Fdes = 1; //00000;       // Desired frequency
+    int Fdes = 100000;      // Desired frequency
 
     float Ttot = 1/Fdes;    // total time period of wave
 
-    float D = 50;           // default duty cycle of 50%
+
 
     while(1)
     {
 
         systick_pwm_gen(D,clock,Ttot,0x02);
-        systick_pwm_gen(D,clock,Ttot,0x00);
+        systick_pwm_gen(100-D,clock,Ttot,0x00);
 
     }
 
