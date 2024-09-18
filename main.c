@@ -20,14 +20,12 @@ Implement the same but using only 1 switch (SW1 OR SW2) – short press for d incr
  * */
 
 
-
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <tm4c123gh6pm.h>
 
- float D = 50;           // default duty cycle of 50% // GLOBAL VARIABLE
-
+int clock = 16000000;       // global variable
 
 void GPIO_PORTF_INIT(void)
 {
@@ -40,96 +38,125 @@ void GPIO_PORTF_INIT(void)
 
     GPIO_PORTF_DEN_R = 0x1F;    //enable digital operation at pins
     GPIO_PORTF_PUR_R = 0x11;    //enable pullups for switches
+    // GPIO_PORTF_DATA_R =  0x0;    // put no data on GPIO
 
 
 
-    /*.............interrupt enabling : below part.................................*/
-
-     GPIO_PORTF_IM_R  = 0x00;           // mask the interrupts
-
-     GPIO_PORTF_IS_R  &= ~(1<<4) ;      // sw2 edge detection only
-     GPIO_PORTF_IBE_R &= ~(1<<4);       // int gen controlled by IEV, no both-edge-det
+    /* ..........................................below part for interrupts..................................................... */
 
 
 
-     GPIO_PORTF_IEV_R &= ~(1<<4);       // low level or falling edge triggers int
+      GPIO_PORTF_IM_R  = 0x00;
 
-     GPIO_PORTF_ICR_R = 0x01;           // clear int if any
+     GPIO_PORTF_IS_R  |= (1<<4) ;   // sw2 level detection only
+     GPIO_PORTF_IBE_R &= ~(1<<4);   // int gen controlled by IEV
 
-     GPIO_PORTF_IM_R  |= (1<<4);        // send int to controller
 
+
+     GPIO_PORTF_IEV_R &= ~(1<<4); // low level or falling edge triggers int
+
+    //GPIO_PORTF_ICR_R = 0x01;   // clear int // not needed for level sensitive app
+
+     GPIO_PORTF_IM_R  |= (1<<4);  // send int to controller
+
+
+
+
+     //GPIO_PORTF_RIS_R this is set when interrupt occurs.
+
+     //GPIO_PORTF_MIS_R this is set when int has reached int ctrll
+
+    // GPIO_PORTF_ICR_R for level detect this has no effect
 
 
 
 }
 
 
-void systick_pwm_gen(float d, int clock, float Ttot,int state)
+void delay(float time, int clock)
 {
 
-    float T = (d*Ttot)/100;        // calculating on time for diven duty cycle
-
-    float reload_val = T*clock;    // calculating reload value for timer
-
-    NVIC_ST_RELOAD_R = reload_val;       // reload value
-    NVIC_ST_CURRENT_R  = 0x0;     // current value
-    NVIC_ST_CTRL_R = 0x05;       // enable and choice of clk
-
-
+    float val;
+    val = (time*clock)/1000;
+    NVIC_ST_RELOAD_R = val;        // reload value
+    NVIC_ST_CURRENT_R  = 0x0;         // current value
+    NVIC_ST_CTRL_R = 0x05;          // enable and choice of clk
 
     while((NVIC_ST_CTRL_R & (1<<16)) == 0)
       {
-
-          GPIO_PORTF_DATA_R = state;
+            //do nothing
       }
-
-
-
      NVIC_ST_CTRL_R = 0x0;
 
 
 }
 
-
 void GPIO_PORTF_Handler(void)
 {
 
-    if((GPIO_PORTF_MIS_R & (1<<4)))
-    {
-        GPIO_PORTF_DATA_R |= 0x04;
 
-    }
+
+         int state1 = GPIO_PORTF_DATA_R & (1<<4);
+
+         delay(25,clock);
+         int state12 = GPIO_PORTF_DATA_R & (1<<4);
+
+         delay(375,clock);
+         int state2 = GPIO_PORTF_DATA_R & (1<<4);
+
+             if(state1 == state2){
+
+              GPIO_PORTF_DATA_R ^= (0x04);
+              }
+
+
+          //delay(25,clock);
+
+
+              if(state1 == state12){
+
+                  GPIO_PORTF_DATA_R ^= 0x02;
+
+              }
+
 
 
 }
 
 
+void pwm_gen(float Fdes)
+{
+
+    /*                  for output: PF2 :  Motion Control Module 1 PWM 6. This signal is
+                                    controlled by Module 1 PWM Generator 3.                             */
+
+
+   /* PWMCTL
+    PWMSYNC
+    PWMSTATUS---------> related to fault
+    PWMPP ------------> provides info of pwm module */
+
+
+
+    /*  PWM1_CTL_R = 0x08; //updates load register on nxt cycle for gen3
+        PWM1_SYNC_R = 0x08; //reset counter of gen3 */
+
+}
+
 
 void main(void)
 {
-
-    NVIC_EN0_R = (1<<30);   // enabling int on PORTF
+    NVIC_EN0_R = (1<<30); // enabling int on PORTF
     GPIO_PORTF_INIT();
+    //int state0, state1;
 
-
-    int clock = 16000000;   // on chip clock @ 16Mhz
-
-    int Fdes = 100000;      // Desired frequency
-
-    float Ttot = 1/Fdes;    // total time period of wave
-
-
+    pwm_gen(100000);
 
     while(1)
     {
 
-        systick_pwm_gen(D,clock,Ttot,0x02);
-        systick_pwm_gen(100-D,clock,Ttot,0x00);
+
 
     }
 
-
-
-
-    //return 0;
 }
