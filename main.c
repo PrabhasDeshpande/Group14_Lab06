@@ -1,18 +1,23 @@
+//Lab 6 part 1
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "tm4c123gh6pm.h"
+
+
+
 /*
- *
- *
- * Part 1:
+ *          Part 1:
 
 Create a PWM waveform with frequency = 100KHz and variable duty cycle.
 
 The program should begin with d = 50%.
 
 On pressing one switch the duty should be increased by 5% and on pressing other switch it should be decreased by 5%.
-
-
-Part 2:
-
-Implement the same but using only 1 switch (SW1 OR SW2) – short press for d increase and long press for decrease.
+ *
+ *
+ *
+ *
  *
  *
  *
@@ -20,143 +25,122 @@ Implement the same but using only 1 switch (SW1 OR SW2) – short press for d incr
  * */
 
 
-#include <stdint.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <tm4c123gh6pm.h>
 
-int clock = 16000000;       // global variable
 
-void GPIO_PORTF_INIT(void)
+#define frequency 100000 //100 kHz frequency
+#define time_period (16000000/frequency)
+#define del_duty 15 //Change in duty cycle for each button press
+volatile int duty;
+
+
+
+
+void GPIOFHandler(void);        // GPIO Int Handler fxn
+
+
+void GPIO_PORTF_setup(void);    // setting GPIO
+void PWMConfig(void);
+void dual_switch(void);
+
+
+
+
+
+void GPIO_PORTF_setup(void)
 {
-    SYSCTL_RCGCGPIO_R |= 0x20;  //enable clock to portf
-
-    //GPIO_PORTF_LOCK_R = 0X4C4F434B;
-    //GPIO_PORTF_CR_R = 0X1F;
-
-    GPIO_PORTF_DIR_R = 0x0E;    //set correct directions
-
-    GPIO_PORTF_DEN_R = 0x1F;    //enable digital operation at pins
-    GPIO_PORTF_PUR_R = 0x11;    //enable pullups for switches
-    // GPIO_PORTF_DATA_R =  0x0;    // put no data on GPIO
+    SYSCTL_RCGCGPIO_R |= (1<<5);        /* enable clock to GPIOF */
+    GPIO_PORTF_LOCK_R = 0x4C4F434B;     /* unlock commit register */
+    GPIO_PORTF_CR_R = 0x1F;             /* make PORTF0 configurable */
+    GPIO_PORTF_PUR_R = 0x11;
+    GPIO_PORTF_DEN_R = 0x1F;
+    GPIO_PORTF_DIR_R = 0x0E;
 
 
-
-    /* ..........................................below part for interrupts..................................................... */
-
-
-
-      GPIO_PORTF_IM_R  = 0x00;
-
-     GPIO_PORTF_IS_R  |= (1<<4) ;   // sw2 level detection only
-     GPIO_PORTF_IBE_R &= ~(1<<4);   // int gen controlled by IEV
-
-
-
-     GPIO_PORTF_IEV_R &= ~(1<<4); // low level or falling edge triggers int
-
-    //GPIO_PORTF_ICR_R = 0x01;   // clear int // not needed for level sensitive app
-
-     GPIO_PORTF_IM_R  |= (1<<4);  // send int to controller
+    GPIO_PORTF_IM_R &= ~0x11; // mask interrupt by clearing bits
+    GPIO_PORTF_IS_R &= ~0x11; // edge sensitive interrupts
+    GPIO_PORTF_IBE_R &= ~0x11; // interrupt NOT on both edges
+    GPIO_PORTF_IEV_R &= ~0x11; // rising edge trigger
 
 
 
 
-     //GPIO_PORTF_RIS_R this is set when interrupt occurs.
-
-     //GPIO_PORTF_MIS_R this is set when int has reached int ctrll
-
-    // GPIO_PORTF_ICR_R for level detect this has no effect
+    GPIO_PORTF_ICR_R |= 0x11; // clear any prior interrupt
+    GPIO_PORTF_IM_R |= 0x11; // unmask interrupt by setting bits
 
 
+
+
+    NVIC_PRI7_R &= 0xFF3FFFFF;    // Prioritize and enable interrupts in NVIC //
+
+    NVIC_EN0_R |= 1 << 30;       // enable interrupt 30 (port F)
 
 }
 
-
-void delay(float time, int clock)
+void PWMConfig(void)
 {
+    SYSCTL_RCGCPWM_R |= (1<<1);     // Enable PWM1 clock
+    GPIO_PORTF_AFSEL_R |= (1<<2);   //Enable alternate function
+    GPIO_PORTF_PCTL_R |= 0x500;     //Make PF2 as PWM output
 
-    float val;
-    val = (time*clock)/1000;
-    NVIC_ST_RELOAD_R = val;        // reload value
-    NVIC_ST_CURRENT_R  = 0x0;         // current value
-    NVIC_ST_CTRL_R = 0x05;          // enable and choice of clk
-
-    while((NVIC_ST_CTRL_R & (1<<16)) == 0)
-      {
-            //do nothing
-      }
-     NVIC_ST_CTRL_R = 0x0;
-
-
+    // Configure the PWM generator
+    PWM1_3_CTL_R |= 0x00; // Disable PWM3 while configuring and select down count mode
+    PWM1_3_GENA_R = 0x8C; // Set PWM3A to produce a symmetric down-counting PWM signal
+    PWM1_3_LOAD_R = 160;
+    PWM1_3_CMPA_R = (duty/100)*time_period - 1;
+    PWM1_3_CTL_R |= 0x01; //Enable generator 3 counter
+    PWM1_ENABLE_R |= 0x040; // Enable PWM1 channel 6 Output
 }
-
-void GPIO_PORTF_Handler(void)
-{
-
-
-
-         int state1 = GPIO_PORTF_DATA_R & (1<<4);
-
-         delay(25,clock);
-         int state12 = GPIO_PORTF_DATA_R & (1<<4);
-
-         delay(375,clock);
-         int state2 = GPIO_PORTF_DATA_R & (1<<4);
-
-             if(state1 == state2){
-
-              GPIO_PORTF_DATA_R ^= (0x04);
-              }
-
-
-          //delay(25,clock);
-
-
-              if(state1 == state12){
-
-                  GPIO_PORTF_DATA_R ^= 0x02;
-
-              }
-
-
-
-}
-
-
-void pwm_gen(float Fdes)
-{
-
-    /*                  for output: PF2 :  Motion Control Module 1 PWM 6. This signal is
-                                    controlled by Module 1 PWM Generator 3.                             */
-
-
-   /* PWMCTL
-    PWMSYNC
-    PWMSTATUS---------> related to fault
-    PWMPP ------------> provides info of pwm module */
-
-
-
-    /*  PWM1_CTL_R = 0x08; //updates load register on nxt cycle for gen3
-        PWM1_SYNC_R = 0x08; //reset counter of gen3 */
-
-}
-
 
 void main(void)
+
 {
-    NVIC_EN0_R = (1<<30); // enabling int on PORTF
-    GPIO_PORTF_INIT();
-    //int state0, state1;
-
-    pwm_gen(100000);
-
-    while(1)
-    {
-
-
-
+    GPIO_PORTF_setup();
+    PWMConfig();
+    duty=50; //Initial duty cycle is 50%
+    PWM1_3_CMPA_R = (time_period * duty) / 100; //50% duty cycle to PWM upon start up
+    while(1){
+        //do nothing
     }
+}
 
+void GPIOFHandler(void)
+{
+    dual_switch();
+
+    int wait;
+    for(wait = 0; wait <1600*1000/4; wait++){}           //Debounce Delay of 0.25seconds
+
+    GPIO_PORTF_ICR_R = 0x11;
+    GPIO_PORTF_IM_R |= 0x11;
+}
+
+void dual_switch(void)
+{
+    GPIO_PORTF_IM_R &= ~0x11;
+
+        if(GPIO_PORTF_RIS_R & 0x10)    //SW 2
+        {
+            if (duty < 90)
+                   {
+                       duty = duty + del_duty;
+                   }
+            if (duty >= 90){
+                duty = 90;
+            }
+        }
+        if (GPIO_PORTF_RIS_R & 0x01)    //SW 1
+        {
+            if (duty > 5)
+                   {
+                       duty = duty - del_duty;
+                   }
+            if (duty <= 5){
+                duty = 5;
+            }
+        }
+        if (GPIO_PORTF_RIS_R & 0x11)    //Both switches pressed at a time
+        {
+            duty = duty;
+        }
+        PWM1_3_CMPA_R = (time_period * duty) / 100;
 }
